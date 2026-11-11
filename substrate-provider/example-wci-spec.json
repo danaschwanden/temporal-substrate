@@ -1,0 +1,23 @@
+{
+  "scaling_group_specs": {
+    "default": {
+      "compute": {
+        "provider_type": "substrate",
+        "config": {
+          "atespace": "temporal-workers-orders",
+          "actor_template": "orders-worker-v42",
+          "pool_size": "20"
+        }
+      },
+      "scaling": {
+        "scaling_algorithm": "rate-based",
+        "config": {
+          "max_count": "20",
+          "initial_count": "0",
+          "metrics_poll_interval_ms": "30000",
+          "scale_down_cooldown_ms": "30000"
+        }
+      }
+    }
+  }
+}

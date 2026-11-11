@@ -1,0 +1,20 @@
+diff --git a/wci/workflow/iface/spec.go b/wci/workflow/iface/spec.go
+index 7583096..233af54 100644
+--- a/wci/workflow/iface/spec.go
++++ b/wci/workflow/iface/spec.go
+@@ -55,6 +55,7 @@ const (
+ 	ComputeProviderTypeSubprocess    ComputeProviderType = "subprocess"
+ 	ComputeProviderTypeK8s           ComputeProviderType = "k8s"
+ 	ComputeProviderTypeGCPCloudRun   ComputeProviderType = "gcp-cloud-run"
++	ComputeProviderTypeSubstrate     ComputeProviderType = "substrate"
+ 	ComputeProviderTypeTestInvoke    ComputeProviderType = "test-invoke"
+ 	ComputeProviderTypeTestWorkerSet ComputeProviderType = "test-worker-set"
+ 
+@@ -69,6 +70,7 @@ var validComputeProviderTypes = map[string]ComputeProviderType{
+ 	string(ComputeProviderTypeSubprocess):    ComputeProviderTypeSubprocess,
+ 	string(ComputeProviderTypeK8s):           ComputeProviderTypeK8s,
+ 	string(ComputeProviderTypeGCPCloudRun):   ComputeProviderTypeGCPCloudRun,
++	string(ComputeProviderTypeSubstrate):     ComputeProviderTypeSubstrate,
+ 	string(ComputeProviderTypeTestInvoke):    ComputeProviderTypeTestInvoke,
+ 	string(ComputeProviderTypeTestWorkerSet): ComputeProviderTypeTestWorkerSet,
+ }
