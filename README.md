@@ -38,7 +38,7 @@ Each successful workflow step records a reference to a Substrate snapshot in wor
 - Debugging: any failed step can be replayed in the exact sandbox state it ran in.
 
 **Challenges**
-- Unclear whether Substrate exposes addressable snapshot IDs and fork or restore-to-snapshot, or only suspend/resume of the latest state.
+- Partly answered by the `ateapi` source: `RevertActor` restores an actor to its last *durable* snapshot, and `CreateActor` can seed a new actor from a snapshot **Tag** (`source_tag`), which is a basis for forking. Still open: whether arbitrary earlier snapshot generations can be tagged and restored.
 - Snapshot storage cost and garbage collection (retention tied to the workflow's lifetime).
 - External side effects (API calls, git pushes) can't be undone by restoring a snapshot.
 - Consistency between snapshot writes and workflow events.
@@ -52,21 +52,39 @@ Each successful workflow step records a reference to a Substrate snapshot in wor
 
 ## 3. Substrate as a Serverless Worker Target
 
-Temporal's Serverless Workers (AWS Lambda, Cloud Run) start, scale and shut down Workers based on task-queue backlog. Substrate could be another target: Workers run as suspended actors that resume in under 400ms when work arrives. This is most valuable for multi-tenant platforms where customers supply their own workflow or activity code, since each tenant gets a VM-grade boundary.
+Temporal's Serverless Workers start, scale and stop Workers based on task-queue load. The open-source scaler behind them, the **Worker Controller Instance (WCI)** in [`temporal-auto-scaled-workers`](https://github.com/temporalio/temporal-auto-scaled-workers) (MIT), has a pluggable compute-provider interface. So Substrate becomes a target by writing a **compute provider**, not a new WCI. Workers run as Substrate actors that resume from a pre-warmed snapshot. This is most valuable for multi-tenant platforms where customers supply their own Worker code, since each tenant gets a VM-grade boundary.
+
+**How the WCI works**
+- The WCI is a system workflow, one per Worker Deployment Version (deployment name + build ID). The Matching Service signals it when a task finds no free Worker. It also polls backlog and dispatch metrics, runs a scaling algorithm, and calls a compute provider.
+- A provider implements four methods: `LaunchStrategy`, `ValidateConfig`, `InvokeWorker` and `UpdateWorkerSetSize`. It registers under a type string (`aws-lambda`, `aws-ecs`, `aws-agentcore`, `gcp-cloud-run`, `k8s`, `subprocess`).
+- There are two launch strategies. **Invoke** starts one short-lived Worker per scaling event (Lambda). **Worker-set** resizes a managed pool (ECS, Cloud Run, k8s). The `rate-based` algorithm drives worker-sets and can scale down to zero.
+
+**Design: a worker-set of actors**
+- One `ActorTemplate` per build ID. Substrate builds a **golden snapshot** of each template after the Worker boots, so a new Worker is a resume instead of a cold start.
+- One pool of actors per build ID, named `<prefix>-0 … <prefix>-(pool-1)`. `UpdateWorkerSetSize(N)` keeps actors `[0, N)` running (create, revert if crashed, resume) and suspends `[N, pool)`. It keeps no state, so WCI retries are safe.
+- Worker-set was chosen over invoke because **Substrate doesn't suspend idle actors by itself**. The caller has to call `SuspendActor`. Under invoke, nothing would ever scale down. Under worker-set, the WCI's own scale-down decisions free the compute.
 
 **Benefits**
-- Scale-to-zero density at 10–30x oversubscription, on your own Kubernetes cluster instead of Lambda.
-- Safe execution of customer-supplied Worker code.
-- Credentials stay out of the sandbox: Temporal API keys and mTLS are injected by the egress gateway.
-- Fits with Temporal Worker Versioning: an ActorTemplate maps to a Worker Deployment Version.
+- Scale-to-zero at 10–30x oversubscription, on your own Kubernetes cluster instead of Lambda.
+- Fast cold starts: the golden snapshot already holds an initialized Worker.
+- Safe execution of customer-supplied Worker code in gVisor or microVM sandboxes.
+- Credentials stay out of the sandbox: the Worker's Temporal API key can be injected by Substrate's egress gateway.
+- Maps directly onto Worker Versioning, which Serverless Workers require anyway: one Worker Deployment Version ↔ one `ActorTemplate` ↔ one pool.
 
 **Challenges**
-- Normal Workers long-poll task queues, so they never go idle and Substrate can't suspend them. This requires a push/invoke model.
-- Depends on Temporal's serverless invocation interface being open to third-party compute targets.
-- Cold-start budget: the Temporal SDK has to initialize quickly after a restore.
-- The scaling signal (backlog latency) has to be mapped onto actor activation.
+- **Self-hosted only.** The WCI is wired into the Temporal server (a task hook in the Matching Service), so a custom provider means a custom server build. Temporal Cloud only gets this if it's upstreamed.
+- **Closed enum.** Provider types are validated against a fixed list, so adding `substrate` needs a small patch to `iface/spec.go`.
+- **Pre-release.** The provider interface already changed between March and November 2026 (it gained a `RequestContext` argument). Both projects are pre-1.0.
+- **Connections after resume.** A restored Worker's gRPC connections and in-flight long-polls to Temporal are dead. The SDK must reconnect cleanly. This is the biggest unknown.
+- **Scale-down mid-task.** Suspending a busy Worker snapshots it mid-Activity. Temporal retries the task elsewhere, but a graceful drain before suspend is better.
+- **Dependency weight.** Substrate's generated API lives in its main Go module (Go 1.27, Kubernetes dependencies). A separate API module upstream would help.
+- **Trust in both directions.** The WCI's SPIFFE identity must be allowed by `ate-api-server`. The provider's endpoint and credentials must be operator-side, never in the tenant's spec.
 
 **Next steps**
-- Study how Temporal's Lambda and Cloud Run serverless integrations invoke Workers, and whether that interface is pluggable.
-- Prototype a bridge controller: watch task-queue backlog, then resume actors that poll for a single task and drain.
-- Talk to Temporal's AI Partner Ecosystem team about a Substrate target.
+1. Integrate the skeleton in `substrate-provider/` into a checkout of `temporal-auto-scaled-workers` and run its tests against the real dependencies.
+2. Spike the riskiest assumption: suspend a running Go Worker on Substrate, resume it, and confirm it reconnects and picks up new tasks.
+3. Run end to end on kind: Temporal dev server with WCI enabled + Substrate + an `ActorTemplate` wrapping a sample Worker.
+4. Add graceful drain, and move operator settings to dynamic config.
+5. Share the result with Temporal (upstreaming the provider) and in Substrate's `#substrate-dev` (a separate API module).
+
+**Provider skeleton:** `substrate-provider/` contains `substrate.go`, `substrate_dial.go`, tests, the enum patch and an example WCI spec. See its README for integration steps and what has been verified.
