@@ -71,7 +71,7 @@ func main() {
 				log.Println(what, "ready")
 				return
 			}
-			if ctx.Err() != nil {
+			if !isTransient(err) || ctx.Err() != nil {
 				log.Fatalln(what+":", err)
 			}
 			log.Printf("%s: %v (retrying)", what, err)
@@ -108,9 +108,11 @@ func main() {
 		// Start one Worker as soon as the version exists, so its task queue
 		// gets registered with the version. The scaler then scales it back to
 		// zero once the queue is idle.
-		"initial_count":            "1",
-		"max_count":                *maxCount,
-		"metrics_poll_interval_ms": "10000",
+		"initial_count": "1",
+		"max_count":     *maxCount,
+		// The scaler's minimum poll interval is 30s, and the poll interval
+		// must be at least the scale-down cooldown.
+		"metrics_poll_interval_ms": "30000",
 		"scale_down_cooldown_ms":   "30000",
 	})
 	retry("version "+*deployment+"/"+*buildID, func() error {
@@ -143,6 +145,18 @@ func mustPayload(v map[string]string) *commonpb.Payload {
 		log.Fatalln("encode details:", err)
 	}
 	return p
+}
+
+// isTransient: worth retrying. A freshly registered namespace takes a few
+// seconds to reach every service; anything else (an invalid config, missing
+// permissions) won't fix itself.
+func isTransient(err error) bool {
+	var (
+		nsNotFound  *serviceerror.NamespaceNotFound
+		unavailable *serviceerror.Unavailable
+		deadline    *serviceerror.DeadlineExceeded
+	)
+	return errors.As(err, &nsNotFound) || errors.As(err, &unavailable) || errors.As(err, &deadline)
 }
 
 func isAlreadyExists(err error) bool {

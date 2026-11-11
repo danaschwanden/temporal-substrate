@@ -18,6 +18,22 @@ RUN set -e; \
     fetch temporal-auto-scaled-workers https://github.com/temporalio/temporal-auto-scaled-workers.git "${WCI_REF}"; \
     fetch substrate                    https://github.com/agent-substrate/substrate.git               "${SUBSTRATE_REF}"
 
+# 1b. The provider needs only Substrate's generated API package, which imports
+#     nothing but gRPC and protobuf. Replacing go.ate.dev/substrate with the
+#     whole repo would put all of Substrate's requirements into the server's
+#     module graph (it raised go.opentelemetry.io/otel/log to a version the
+#     server doesn't compile with). So: a module with just that package,
+#     requiring gRPC and protobuf at the server's own versions, which leaves
+#     every server dependency where it was.
+RUN set -e; \
+    mkdir -p substrate-api/api/ateapi; \
+    cp -r substrate/api/ateapi/v1 substrate-api/api/ateapi/v1; \
+    v() { awk -v m="$1" '$1 == m { print $2; exit }' temporal/go.mod; }; \
+    printf 'module go.ate.dev/substrate\n\ngo 1.24\n\nrequire (\n\tgoogle.golang.org/grpc %s\n\tgoogle.golang.org/protobuf %s\n)\n' \
+      "$(v google.golang.org/grpc)" "$(v google.golang.org/protobuf)" > substrate-api/go.mod; \
+    cat substrate-api/go.mod; \
+    grep -q 'grpc v1' substrate-api/go.mod && grep -q 'protobuf v1' substrate-api/go.mod
+
 # 2. Add the provider to the WCI and run its tests against the real dependencies.
 COPY workerprotocol/ demo/workerprotocol/
 COPY provider/ demo/provider/
@@ -25,7 +41,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.
     set -e; cd temporal-auto-scaled-workers; \
     git apply ../demo/provider/patches/*.patch; \
     cp ../demo/provider/substrate*.go wci/workflow/compute_provider/; \
-    go mod edit -replace go.ate.dev/substrate=../substrate \
+    go mod edit -replace go.ate.dev/substrate=../substrate-api \
                 -replace temporal-substrate-demo/workerprotocol=../demo/workerprotocol; \
     go mod tidy; \
     go test -tags computeprovider_substrate ./wci/workflow/compute_provider/
@@ -35,7 +51,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.
 RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     set -e; cd temporal; \
     go mod edit -replace go.temporal.io/auto-scaled-workers=../temporal-auto-scaled-workers \
-                -replace go.ate.dev/substrate=../substrate \
+                -replace go.ate.dev/substrate=../substrate-api \
                 -replace temporal-substrate-demo/workerprotocol=../demo/workerprotocol; \
     go mod tidy; \
     make temporal-server BUILD_TAG=computeprovider_substrate; \

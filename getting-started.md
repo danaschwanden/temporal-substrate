@@ -115,7 +115,7 @@ kubectl -n temporal run setup --rm -i --restart=Never --image-pull-policy=Always
   --image=localhost:5001/hello-client:dev --command -- /setup
 ```
 
-[`setup`](client/setup/main.go) registers the version with a compute config: provider `substrate` (atespace `hello-v1`, up to 3 actors) and a scaler that goes from 0 to 3 Workers. Right away, `worker-0` resumes once so the Worker can register its task queue with Temporal. It is suspended again after a minute or two.
+[`setup`](client/setup/main.go) registers the version with a compute config: provider `substrate` (atespace `hello-v1`, up to 3 actors) and a scaler that goes from 0 to 3 Workers. Right away, `worker-0` resumes once so the Worker can register its task queue with Temporal. It is suspended again after a couple of minutes.
 
 ## 6. Send a request
 
@@ -138,15 +138,20 @@ Run step 6 again and look for:
 
 1. **Idle:** `worker-0` is `SUSPENDED`.
 2. **Workflow starts:** `worker-0` turns `RUNNING` within seconds.
-3. **A minute or two after it finishes:** `worker-0` is `SUSPENDED` again.
+3. **A couple of minutes after it finishes:** `worker-0` is `SUSPENDED` again.
 
-Start three at once to see more Workers:
+Start three at once. The pods run detached, so they don't compete for your terminal:
 
 ```bash
 for i in 1 2 3; do
-  kubectl -n temporal run hello-$i --rm -i --restart=Never --image=localhost:5001/hello-client:dev -- "Run $i" &
-done; wait
+  kubectl -n temporal run hello-$i --restart=Never --image=localhost:5001/hello-client:dev -- "Run $i"
+done
+kubectl -n temporal wait --for=jsonpath='{.status.phase}'=Succeeded pod/hello-1 pod/hello-2 pod/hello-3 --timeout=180s
+for i in 1 2 3; do kubectl -n temporal logs hello-$i | tail -1; done
+kubectl -n temporal delete pod hello-1 hello-2 hello-3
 ```
+
+The scaler sizes the pool from the backlog, so you may see one actor resume or several. Hello World finishes in milliseconds, so a single Worker often drains all three runs before a second one is needed.
 
 More to look at:
 
@@ -465,12 +470,12 @@ Unknown keys are rejected, so a typo like `pool_sise` fails at validation instea
 
 | File | Key lines and why |
 |---|---|
-| [`temporal-server/Dockerfile`](temporal-server/Dockerfile) | Fetches Temporal, the WCI and Substrate at the commits in `versions.env`, then patches and runs `go test` on the provider before building. The `replace` directives are set on **both** the WCI and the server module, because Go ignores `replace` in dependencies. The last line, `go tool nm … \| grep substrateComputeProvider`, fails the build if the provider didn't make it into the binary. |
-| [`temporal-server/deploy/temporal.yaml`](temporal-server/deploy/temporal.yaml) | Dynamic config `workercontroller.enabled` and `compute_providers.enabled: ["substrate"]`; an unlisted provider behaves as if it didn't exist. A projected volume holds `ca.crt` (Substrate's service CA) and `credential-bundle.pem` (a pod certificate with SPIFFE ID `…/ns/temporal/sa/temporal-server`). The namespace label `ate.dev/api-access=true` lets Substrate's NetworkPolicy admit the pod. |
+| [`temporal-server/Dockerfile`](temporal-server/Dockerfile) | Fetches Temporal, the WCI and Substrate at the commits in `versions.env`, then patches and runs `go test` on the provider before building. Step 1b turns Substrate's generated API package (`api/ateapi/v1`) into a module of its own, requiring gRPC and protobuf at the *server's* versions. Pointing `go.ate.dev/substrate` at the whole repo would add all of Substrate's requirements to the server's dependencies. The `replace` directives are set on **both** the WCI and the server module, because Go ignores `replace` in dependencies. The last line, `go tool nm … \| grep substrateComputeProvider`, fails the build if the provider didn't make it into the binary. |
+| [`temporal-server/deploy/temporal.yaml`](temporal-server/deploy/temporal.yaml) | Dynamic config `workercontroller.enabled` and `compute_providers.enabled: ["substrate"]`; an unlisted provider behaves as if it didn't exist. A projected volume holds `ca.crt` (Substrate's service CA) and `credential-bundle.pem` (a pod certificate with SPIFFE ID `…/ns/temporal/sa/temporal-server`). The namespace label `ate.dev/api-access=true` lets Substrate's NetworkPolicy admit the pod. `enableServiceLinks: false` stops Kubernetes from injecting `TEMPORAL_UI_PORT=tcp://…` (from the `temporal-ui` Service), which the UI otherwise reads as its port and crashes on. |
 | [`actor/deploy/hello-worker-template.yaml`](actor/deploy/hello-worker-template.yaml) | Image by digest; `wakeupProbe` on `/readyz:80` (this gates resumes, and it is the moment the golden snapshot is taken); `SNAPSHOT_FIDELITY_MEMORY`. Deliberately no Temporal settings and no golden egress policy. |
 | [`actor/deploy/access-policy.yaml`](actor/deploy/access-policy.yaml) | `editor` on atespace `hello-v1` for the server's SPIFFE ID, and nothing more. |
-| [`client/setup/main.go`](client/setup/main.go) | `CreateWorkerDeploymentVersion` with a `ComputeConfig`: provider `substrate`, scaler `rate-based` (`min_count 0`, `initial_count 1`, `max_count 3`). `initial_count 1` starts one Worker right away, so the task queue gets registered with the version; without it, the WCI has no queue to watch. The calls mirror the WCI's own integration tests. |
-| [`client/start/main.go`](client/start/main.go) | The quickstart starter, pinned to `hello/v1` with `PinnedVersioningOverride`. Without a version, the task would wait for an unversioned Worker that never comes. The workflow is started by name, so the client doesn't import the actor's code. |
+| [`client/setup/main.go`](client/setup/main.go) | `CreateWorkerDeploymentVersion` with a `ComputeConfig`: provider `substrate`, scaler `rate-based` (`min_count 0`, `initial_count 1`, `max_count 3`). `initial_count 1` starts one Worker right away, so the task queue gets registered with the version; without it, the WCI has no queue to watch. The scaler polls metrics every 30 s, its minimum; the Worker Controller rejects shorter intervals. The calls mirror the WCI's own integration tests. |
+| [`client/start/main.go`](client/start/main.go) | The quickstart starter, pinned to `hello/v1` with `PinnedVersioningOverride`. Each run gets its own workflow ID: the quickstart's fixed `greeting-workflow` made parallel runs collide. Without a version, the task would wait for an unversioned Worker that never comes. The workflow is started by name, so the client doesn't import the actor's code. |
 | [`toolbox.sh`](toolbox.sh), [`tools/Dockerfile`](tools/Dockerfile) | Go, the Docker CLI and kubectl in a container that shares the host's Docker socket and **network**. Host networking is what lets Substrate's kind script and the `localhost:5001` registry work unchanged. |
 
 ## F. How we got here
@@ -499,6 +504,7 @@ The design came out of a sequence of discoveries. Each step below names what we 
 
     All four were implemented, plus strict config keys.
 11. **Making it runnable.** All builds moved into Docker, and Docker became the only host requirement. A one-command version proved too opaque, so this guide shows each core step as plain commands in a toolbox shell.
+12. **The first real build.** The provider's tests passed against the real Temporal and Substrate code, but the server failed to compile. Using the whole Substrate repo as a module had raised `go.opentelemetry.io/otel/log` from v0.20.0 to v0.21.0, and the server's `common/wideevents` code doesn't compile against that. **Change:** an API-only module that leaves every server dependency at its version. It was then compiled against the real gRPC and protobuf.
 
 ## G. Decisions at a glance
 
@@ -513,6 +519,7 @@ The design came out of a sequence of discoveries. Each step below names what we 
 | Egress policy before the first resume | Substrate caches a missing policy as a deny | Creating it lazily |
 | Shared connections per process | The WCI constructs providers per activity | A connection per provider instance (leaks) |
 | Credentials injected by the egress gateway | Secrets never enter a sandbox or a snapshot | API keys in the actor's environment |
+| Substrate's API as its own module at the server's gRPC/protobuf versions | The provider needs only the generated API; the full module dragged in Substrate's dependency graph | `replace` to the whole Substrate repo (broke the server build) |
 | All builds in Docker, toolbox with host networking | Docker is the only prerequisite; Substrate's scripts run unchanged | Host builds, or rewriting Substrate's kind script |
 
 ## H. Known limitations
@@ -520,7 +527,8 @@ The design came out of a sequence of discoveries. Each step below names what we 
 - **Not yet run end to end.**
   - The provider's unit tests ran here against stand-ins of the Temporal and Substrate types. Its Substrate calls were diffed against Substrate's generated client, and the router client was tested over real TLS.
   - The protocol and lifecycle tests ran against real code.
-  - The Temporal image build runs the provider's tests against the real dependencies.
+  - The Temporal image build runs the provider's tests against the real dependencies, and they pass.
+  - The API-only Substrate module was compiled against real gRPC and protobuf at the server's versions.
 - **Self-hosted only.** The WCI is compiled into the Temporal server. For Temporal Cloud, the provider would have to be accepted upstream.
 - **Pre-1.0 dependencies.** Both the WCI and Substrate are evolving: the provider interface already changed once during this work.
 - **In-memory Temporal.** The dev server forgets everything on restart. Re-run `setup`.

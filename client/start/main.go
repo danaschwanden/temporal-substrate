@@ -1,7 +1,10 @@
-// Command start is the quickstart's starter with two changes. The workflow is
-// pinned to the Worker Deployment Version the WCI scales, and it is started by
-// its registered name, "SayHelloWorkflow", so the client doesn't import the
-// actor's code. Without a version
+// Command start is the quickstart's starter with three changes:
+//   - The workflow is pinned to the Worker Deployment Version the WCI scales.
+//   - It is started by its registered name, "SayHelloWorkflow", so the client
+//     doesn't import the actor's code.
+//   - Each run gets its own workflow ID, so several can run at once (the
+//     quickstart's fixed "greeting-workflow" would collide). Without a version
+//
 // (or a Current Version on the deployment) the task would wait for an
 // unversioned Worker, and the WCI, which serves one version, would never see it.
 package main
@@ -11,6 +14,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )
@@ -31,7 +35,7 @@ func main() {
 	}
 
 	options := client.StartWorkflowOptions{
-		ID:        "greeting-workflow",
+		ID:        "greeting-workflow-" + uuid.NewString()[:8],
 		TaskQueue: "my-task-queue",
 		VersioningOverride: &client.PinnedVersioningOverride{
 			Version: worker.WorkerDeploymentVersion{

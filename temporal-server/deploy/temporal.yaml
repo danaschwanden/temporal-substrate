@@ -142,6 +142,10 @@ spec:
         app: temporal-server
     spec:
       serviceAccountName: temporal-server
+      # Kubernetes injects <SERVICE>_PORT=tcp://... variables for every Service
+      # in the namespace; with Services named temporal-*, they collide with
+      # Temporal's own TEMPORAL_* settings.
+      enableServiceLinks: false
       containers:
       - name: temporal-server
         image: localhost:5001/temporal-server-substrate:dev
@@ -228,6 +232,10 @@ spec:
       labels:
         app: temporal-ui
     spec:
+      # Without this, the temporal-ui Service injects TEMPORAL_UI_PORT=tcp://...,
+      # which the UI reads as its listen port and crashes on ("cannot unmarshal
+      # !!str `tcp://1...` into int").
+      enableServiceLinks: false
       containers:
       - name: ui
         image: temporalio/ui:2.34.0 # any recent tag works
