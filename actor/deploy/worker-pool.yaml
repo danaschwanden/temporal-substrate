@@ -1,0 +1,32 @@
+# Worker pods that host the hello-world actors. One running actor occupies one
+# worker, so `replicas` caps how many Temporal Workers can run at once: keep it
+# >= the scaler's max_count (3 in client/setup).
+#
+# WORKER_IMAGE is replaced in getting-started.md (step 5) with the gVisor
+# worker image that ate-setup resolved for the counter demo.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: temporal-workers
+---
+apiVersion: ate.dev/v1
+kind: WorkerPool
+metadata:
+  name: hello-worker
+  namespace: temporal-workers
+  labels:
+    workload: temporal-worker
+spec:
+  replicas: 3
+  workerImage: WORKER_IMAGE
+  sandboxClasses:
+  - name: gvisor
+  template:
+    # Same per-worker sizing as the counter demo's pool.
+    resources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 1Gi

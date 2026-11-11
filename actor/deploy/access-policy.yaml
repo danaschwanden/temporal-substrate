@@ -1,0 +1,9 @@
+# Lets the Temporal server manage actors, the template and egress policies in
+# atespace hello-v1 (editor role), and nothing else. One atespace per Worker
+# Deployment Version, so each version gets its own policy.
+metadata:
+  name: default
+bindings:
+- role: editor
+  members:
+  - user:spiffe://cluster.local/ns/temporal/sa/temporal-server

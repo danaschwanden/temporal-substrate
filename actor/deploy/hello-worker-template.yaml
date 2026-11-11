@@ -1,0 +1,37 @@
+# ActorTemplate for Worker Deployment Version hello/v1 (protojson form, like the
+# Substrate demos). Its atespace, hello-v1, is dedicated to this version: the
+# substrate compute provider owns every actor in it.
+#
+# The template carries no Temporal settings. The provider sends the frontend
+# address, namespace and version in each /start request (workerprotocol).
+#
+# HELLO_WORKER_IMAGE is replaced in getting-started.md (step 5) with the
+# pushed image pinned by digest, which Substrate requires.
+metadata:
+  atespace: hello-v1
+  name: hello-worker
+workerSelector:
+  matchLabels:
+    workload: temporal-worker
+containers:
+- name: worker
+  image: HELLO_WORKER_IMAGE
+  # ResumeActor returns only once this answers 200, and the golden snapshot is
+  # taken as soon as it does. Path and port are workerprotocol.PathReady/Port.
+  wakeupProbe:
+    httpGet:
+      path: /readyz
+      port: 80
+    timeoutSeconds: 60
+  # For TLS frontends (temporal_tls=true), also mount Substrate's egress trust
+  # bundle and set SSL_CERT_FILE; see Substrate's egress-trust-bundle guide.
+# An actor occupies its whole worker: at or below the pool's per-worker limits.
+resources:
+  limits:
+    cpuMillicores: 1000
+    memoryBytes: 536870912 # 512Mi
+snapshotConfig:
+  # MEMORY: the golden snapshot holds the initialized process, so a new Worker
+  # is a resume, not a boot.
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
+# No goldenEgressPolicy on purpose: the golden boot must not reach Temporal.

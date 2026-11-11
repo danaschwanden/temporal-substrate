@@ -1,0 +1,254 @@
+# Temporal dev server (all services in one process, in-memory SQLite) with the
+# Worker Controller and the substrate compute provider, plus the Web UI.
+# Everything is lost when the pod restarts: re-run client/setup afterwards.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: temporal
+  labels:
+    # Substrate's NetworkPolicy admits ate-api-server clients only from
+    # namespaces with this label.
+    ate.dev/api-access: "true"
+---
+# The pod certificate for this ServiceAccount carries the SPIFFE ID
+# spiffe://cluster.local/ns/temporal/sa/temporal-server: the principal that
+# ate-api-server authorizes, and the ID atenet-router must allow.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: temporal-server
+  namespace: temporal
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-config
+  namespace: temporal
+data:
+  # Temporal's config/development-sqlite.yaml, with the frontend listening on
+  # all interfaces so other pods (the Workers, the UI) can reach it.
+  config.yaml: |
+    log:
+      stdout: true
+      level: info
+    persistence:
+      defaultStore: sqlite-default
+      visibilityStore: sqlite-visibility
+      numHistoryShards: 1
+      datastores:
+        sqlite-default:
+          sql:
+            pluginName: "sqlite"
+            databaseName: "default"
+            connectAddr: "localhost"
+            connectProtocol: "tcp"
+            connectAttributes:
+              mode: "memory"
+              cache: "private"
+            maxConns: 1
+            maxIdleConns: 1
+            maxConnLifetime: "1h"
+        sqlite-visibility:
+          sql:
+            pluginName: "sqlite"
+            databaseName: "default"
+            connectAddr: "localhost"
+            connectProtocol: "tcp"
+            connectAttributes:
+              mode: "memory"
+              cache: "private"
+            maxConns: 1
+            maxIdleConns: 1
+            maxConnLifetime: "1h"
+    global:
+      membership:
+        maxJoinDuration: 30s
+        broadcastAddress: "127.0.0.1"
+    services:
+      frontend:
+        rpc:
+          grpcPort: 7233
+          membershipPort: 6933
+          bindOnIP: "0.0.0.0"
+          httpPort: 7243
+      matching:
+        rpc:
+          grpcPort: 7235
+          membershipPort: 6935
+          bindOnLocalHost: true
+      history:
+        rpc:
+          grpcPort: 7234
+          membershipPort: 6934
+          bindOnLocalHost: true
+      worker:
+        rpc:
+          grpcPort: 7239
+          membershipPort: 6939
+          bindOnLocalHost: true
+    clusterMetadata:
+      enableGlobalNamespace: false
+      failoverVersionIncrement: 10
+      masterClusterName: "active"
+      currentClusterName: "active"
+      clusterInformation:
+        active:
+          enabled: true
+          initialFailoverVersion: 1
+          rpcName: "frontend"
+          rpcAddress: "localhost:7233"
+          httpAddress: "localhost:7243"
+    dcRedirectionPolicy:
+      policy: "noop"
+    dynamicConfigClient:
+      filepath: "/etc/temporal/config/dynamicconfig.yaml"
+      pollInterval: "10s"
+  dynamicconfig.yaml: |
+    # Worker Deployments and versioning (from Temporal's development-sql.yaml).
+    system.enableDeployments:
+      - value: true
+    system.enableDeploymentVersions:
+      - value: true
+    frontend.workerVersioningDataAPIs:
+      - value: true
+    frontend.workerVersioningWorkflowAPIs:
+      - value: true
+    frontend.workerVersioningRuleAPIs:
+      - value: true
+    limit.maxIDLength:
+      - value: 255
+    # Worker Controller Instances. Only providers listed here are usable:
+    # an unlisted provider type makes the WCI behave as if it didn't exist.
+    workercontroller.enabled:
+      - value: true
+    workercontroller.compute_providers.enabled:
+      - value: ["substrate"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-server
+  namespace: temporal
+spec:
+  replicas: 1 # in-memory persistence: never more than one
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: temporal-server
+  template:
+    metadata:
+      labels:
+        app: temporal-server
+    spec:
+      serviceAccountName: temporal-server
+      containers:
+      - name: temporal-server
+        image: localhost:5001/temporal-server-substrate:dev
+        imagePullPolicy: Always
+        args: ["--config-file", "/etc/temporal/config/config.yaml", "--allow-no-auth", "start"]
+        env:
+        # Read by the substrate compute provider (substrate_dial.go). The
+        # endpoints default to api.ate-system.svc:443 and
+        # atenet-router.ate-system.svc:8444.
+        - name: SUBSTRATE_CA_FILE
+          value: /var/run/ate/ca.crt
+        - name: SUBSTRATE_CREDENTIAL_BUNDLE
+          value: /var/run/ate/credential-bundle.pem
+        ports:
+        - name: grpc
+          containerPort: 7233
+        - name: http
+          containerPort: 7243
+        readinessProbe:
+          tcpSocket:
+            port: grpc
+          periodSeconds: 5
+        volumeMounts:
+        - name: config
+          mountPath: /etc/temporal/config
+        - name: ate
+          mountPath: /var/run/ate
+          readOnly: true
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+      volumes:
+      - name: config
+        configMap:
+          name: temporal-config
+      # Substrate credentials, rotated by the kubelet. The provider re-reads
+      # them on every TLS handshake.
+      - name: ate
+        projected:
+          sources:
+          # Verifies ate-api-server's and atenet-router's serving certificates.
+          - clusterTrustBundle:
+              signerName: servicedns.podcert.ate.dev/identity
+              labelSelector:
+                matchLabels:
+                  podcert.ate.dev/canarying: live
+              path: ca.crt
+          # Client certificate for spiffe://cluster.local/ns/temporal/sa/temporal-server.
+          - podCertificate:
+              signerName: podidentity.podcert.ate.dev/identity
+              keyType: ECDSAP256
+              credentialBundlePath: credential-bundle.pem
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-frontend
+  namespace: temporal
+spec:
+  selector:
+    app: temporal-server
+  ports:
+  - name: grpc
+    port: 7233
+    targetPort: grpc
+    appProtocol: kubernetes.io/h2c
+  - name: http
+    port: 7243
+    targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  namespace: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-ui
+  template:
+    metadata:
+      labels:
+        app: temporal-ui
+    spec:
+      containers:
+      - name: ui
+        image: temporalio/ui:2.34.0 # any recent tag works
+        env:
+        - name: TEMPORAL_ADDRESS
+          value: temporal-frontend.temporal.svc.cluster.local:7233
+        - name: TEMPORAL_CORS_ORIGINS
+          value: http://localhost:8080
+        ports:
+        - name: http
+          containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  namespace: temporal
+spec:
+  selector:
+    app: temporal-ui
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
