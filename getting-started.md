@@ -36,27 +36,6 @@ Your prompt changes to `toolbox:/work$`.
 
 ## 1. Create the kind cluster with Substrate
 
-```mermaid
-flowchart LR
-    cli["kubectl ate<br/>in the toolbox"]
-    registry[("Image registry<br/>localhost:5001")]
-    subgraph kind["kind cluster"]
-        subgraph atesys["ate-system: Substrate"]
-            api["ate-api-server<br/>manages Actors"]
-            router["atenet-router<br/>ingress to Actors"]
-        end
-        subgraph demo["ate-demo-counter: counter demo"]
-            pool["WorkerPool counter<br/>its worker image is reused in step 5"]
-        end
-    end
-    id1["SPIFFE ID<br/>ns/ate-system/sa/atenet-client"]
-    id2["SPIFFE ID<br/>ns/temporal/sa/temporal-server<br/>the one addition to the quickstart"]
-    cli --> api
-    id1 -- "allowed" --> router
-    id2 -- "allowed" --> router
-    registry -. "images" .-> kind
-```
-
 These are Substrate's own quickstart commands:
 
 ```bash
