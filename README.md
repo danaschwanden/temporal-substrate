@@ -1,6 +1,6 @@
 # Temporal Serverless Workers on Agent Substrate
 
-Runs Temporal Workers as [Agent Substrate](https://github.com/agent-substrate/substrate) actors. Temporal's Worker Controller (WCI) decides how many Workers a Worker Deployment Version needs. A compute provider then resumes or suspends Substrate actors to match. Each Worker runs in a gVisor sandbox and starts by resuming a pre-warmed snapshot.
+Runs [Temporal](https://docs.temporal.io/) [Workers](https://docs.temporal.io/serverless-workers) as [Agent Substrate](https://github.com/agent-substrate/substrate) [Actors](https://ate.dev/docs/concepts/architecture/). Temporal's [Worker Controller Instance (WCI)](https://docs.temporal.io/serverless-workers#worker-controller-instance) decides how many Workers a Worker Deployment Version needs. A [compute provider](https://docs.temporal.io/serverless-workers#compute-providers)  then resumes or suspends Substrate Actors to match. Each Worker runs in a [gVisor](https://gvisor.dev/) sandbox and starts by resuming a pre-warmed snapshot.
 
 **To run the demo**, follow [getting-started.md](getting-started.md). Docker is the only requirement.
 
