@@ -8,8 +8,6 @@ You'll run [Temporal's Go Hello World](https://docs.temporal.io/develop/go/set-u
               └──────────── Worker polls, runs workflow ◄── Actor worker-0
 ```
 
-Everything runs locally in a `kind` cluster based on the Agent Substrate [Quickstart](https://github.com/agent-substrate/substrate#quickstart-development).
-
 ![Screenshot the Temporal UI Worker screen](/assets/images/workers.png)
 
 ![Screenshot the Temporal UI Workerflow screen](/assets/images/workflows.png)
@@ -17,6 +15,8 @@ Everything runs locally in a `kind` cluster based on the Agent Substrate [Quicks
 ## Before you start
 
 You only need **Docker**. Go, kubectl and all the builds run in a toolbox container that uses your Docker.
+
+Everything runs locally in a `kind` cluster based on the Agent Substrate [Quickstart](https://github.com/agent-substrate/substrate#quickstart-development).
 
 > [!TIP]
 > - On **macOS or Windows**, enable host networking in Docker Desktop: *Settings → Resources → Network → Enable host networking*.
@@ -36,7 +36,7 @@ Your prompt changes to `toolbox:/work$`.
 
 ## 1. Create the kind cluster with Substrate
 
-These are Substrate's own quickstart commands:
+These are Agent Substrate's own [quickstart](https://github.com/agent-substrate/substrate#quickstart-development) commands:
 
 ```bash
 git clone https://github.com/agent-substrate/substrate.git
