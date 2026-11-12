@@ -12,7 +12,7 @@ Everything runs locally in a `kind` cluster based on the Agent Substrate [Quicks
 
 ![Screenshot the Temporal UI Worker screen](/assets/images/workers.png)
 
-![Screenshot the Temporal UI Workerflow screen](/assets/images/workerflows.png)
+![Screenshot the Temporal UI Workerflow screen](/assets/images/workflows.png)
 
 ## Before you start
 
