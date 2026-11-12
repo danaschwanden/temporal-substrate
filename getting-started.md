@@ -153,12 +153,15 @@ Run step 6 again and look for:
 Start three at once. The pods run detached, so they don't compete for your terminal:
 
 ```bash
-for i in 1 2 3; do
+for i in {1..3}; do
   kubectl -n temporal run hello-$i --restart=Never --image=localhost:5001/hello-client:dev -- "Run $i"
 done
 kubectl -n temporal wait --for=jsonpath='{.status.phase}'=Succeeded pod/hello-1 pod/hello-2 pod/hello-3 --timeout=180s
-for i in 1 2 3; do kubectl -n temporal logs hello-$i | tail -1; done
+for i in {1..3}; do kubectl -n temporal logs hello-$i | tail -1; done
 kubectl -n temporal delete pod hello-1 hello-2 hello-3
+
+# Alternatively, delete all pods that succeeded successfully
+kubectl delete pod --field-selector=status.phase==Succeeded -n temporal
 ```
 
 The scaler sizes the pool from the backlog, so you may see one actor resume or several. Hello World finishes in milliseconds, so a single Worker often drains all three runs before a second one is needed.
