@@ -101,27 +101,6 @@ docker push localhost:5001/hello-client:dev
 
 ## 5. Deploy the Actor
 
-```mermaid
-sequenceDiagram
-    actor You
-    participant S as Substrate
-    participant A as Actor worker-0
-    participant T as Temporal server
-
-    You->>S: Create atespace hello-v1 and its access policy
-    Note over S: The Temporal server may now manage hello-v1
-    You->>S: Add worker pods to host the Actors
-    You->>S: Create the ActorTemplate, image pinned by digest
-    S->>S: Boot the Worker once, take the golden snapshot
-    You->>T: setup: hello/v1 gets its Workers from Substrate, 0 to 3
-    T->>S: Create worker-0 and resume it from the golden snapshot
-    T->>A: /start
-    A->>T: Connect and register the task queue
-    Note over A,T: Idle for a couple of minutes
-    T->>A: /drain
-    T->>S: Suspend worker-0
-```
-
 Each Worker version gets its own atespace (Substrate's grouping of Actors). Create one for `hello/v1` and let the Temporal server manage it:
 
 ```bash
@@ -160,7 +139,35 @@ kubectl -n temporal run setup --rm -i --restart=Never --image-pull-policy=Always
 Right away, `worker-0` resumes once so the Worker can register its task queue with Temporal.  
 It is suspended again after a couple of minutes.
 
+```mermaid
+sequenceDiagram
+    actor You
+    participant S as Substrate
+    participant A as Actor worker-0
+    participant T as Temporal server
+
+    You->>S: Create atespace hello-v1 and its access policy
+    Note over S: The Temporal server may now manage hello-v1
+    You->>S: Add worker pods to host the Actors
+    You->>S: Create the ActorTemplate, image pinned by digest
+    S->>S: Boot the Worker once, take the golden snapshot
+    You->>T: setup: hello/v1 gets its Workers from Substrate, 0 to 3
+    T->>S: Create worker-0 and resume it from the golden snapshot
+    T->>A: /start
+    A->>T: Connect and register the task queue
+    Note over A,T: Idle for a couple of minutes
+    T->>A: /drain
+    T->>S: Suspend worker-0
+```
+
 ## 6. Send a request
+
+```bash
+kubectl -n temporal run hello --rm -i --restart=Never --image-pull-policy=Always \
+  --image=localhost:5001/hello-client:dev -- Temporal
+```
+
+Expect `Workflow result: Hello Temporal` after a few seconds.
 
 ```mermaid
 sequenceDiagram
@@ -179,13 +186,6 @@ sequenceDiagram
     A->>T: Completed
     T-->>C: Workflow result: Hello Temporal
 ```
-
-```bash
-kubectl -n temporal run hello --rm -i --restart=Never --image-pull-policy=Always \
-  --image=localhost:5001/hello-client:dev -- Temporal
-```
-
-Expect `Workflow result: Hello Temporal` after a few seconds.
 
 ## 7. See it scale
 
