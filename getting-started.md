@@ -24,7 +24,11 @@ Open the toolbox. The rest of this guide runs inside it:
 ./toolbox.sh
 ```
 
-Your prompt changes to `toolbox:/work$`. This repo is at `$REPO`, and the pinned versions from `versions.env` are set as environment variables. Type `exit` to leave; `./toolbox.sh` again opens another shell in the same toolbox.
+Your prompt changes to `toolbox:/work$`.
+- This repo is at `$REPO`.
+- The pinned versions from `versions.env` are set as environment variables.
+- Type `exit` to leave
+- Type `./toolbox.sh` again opens another shell in the same toolbox
 
 ## 1. Create the kind cluster with Substrate
 
