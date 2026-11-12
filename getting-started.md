@@ -12,7 +12,7 @@ Everything runs locally in a `kind` cluster based on the Agent Substrate [Quicks
 
 ![Screenshot the Temporal UI Worker screen](/assets/images/workers.png)
 
-![Screenshot the Temporal UI Workerflow screen](/assets/images/workflows.png)
+![Screenshot the Temporal UI Workerflow screen](/assets/images/workerflows.png)
 
 ## Before you start
 
@@ -35,6 +35,27 @@ Your prompt changes to `toolbox:/work$`.
 - Type `./toolbox.sh` again opens another shell in the same toolbox
 
 ## 1. Create the kind cluster with Substrate
+
+```mermaid
+flowchart LR
+    cli["kubectl ate<br/>in the toolbox"]
+    registry[("Image registry<br/>localhost:5001")]
+    subgraph kind["kind cluster"]
+        subgraph atesys["ate-system: Substrate"]
+            api["ate-api-server<br/>manages Actors"]
+            router["atenet-router<br/>ingress to Actors"]
+        end
+        subgraph demo["ate-demo-counter: counter demo"]
+            pool["WorkerPool counter<br/>its worker image is reused in step 5"]
+        end
+    end
+    id1["SPIFFE ID<br/>ns/ate-system/sa/atenet-client"]
+    id2["SPIFFE ID<br/>ns/temporal/sa/temporal-server<br/>the one addition to the quickstart"]
+    cli --> api
+    id1 -- "allowed" --> router
+    id2 -- "allowed" --> router
+    registry -. "images" .-> kind
+```
 
 These are Substrate's own quickstart commands:
 
@@ -101,6 +122,27 @@ docker push localhost:5001/hello-client:dev
 
 ## 5. Deploy the Actor
 
+```mermaid
+sequenceDiagram
+    actor You
+    participant S as Substrate
+    participant A as Actor worker-0
+    participant T as Temporal server
+
+    You->>S: Create atespace hello-v1 and its access policy
+    Note over S: The Temporal server may now manage hello-v1
+    You->>S: Add worker pods to host the Actors
+    You->>S: Create the ActorTemplate, image pinned by digest
+    S->>S: Boot the Worker once, take the golden snapshot
+    You->>T: setup: hello/v1 gets its Workers from Substrate, 0 to 3
+    T->>S: Create worker-0 and resume it from the golden snapshot
+    T->>A: /start
+    A->>T: Connect and register the task queue
+    Note over A,T: Idle for a couple of minutes
+    T->>A: /drain
+    T->>S: Suspend worker-0
+```
+
 Each Worker version gets its own atespace (Substrate's grouping of Actors). Create one for `hello/v1` and let the Temporal server manage it:
 
 ```bash
@@ -141,6 +183,24 @@ It is suspended again after a couple of minutes.
 
 ## 6. Send a request
 
+```mermaid
+sequenceDiagram
+    participant C as hello client
+    participant T as Temporal server
+    participant S as Substrate
+    participant A as Actor worker-0
+
+    C->>T: Start the workflow on hello/v1 with "Temporal"
+    Note over T: A task is waiting, so the scaler asks for a Worker
+    T->>S: Resume worker-0
+    S-->>A: Restored from its snapshot in under a second
+    T->>A: /start
+    A->>T: Connect and poll the task queue
+    T-->>A: Workflow and activity tasks
+    A->>T: Completed
+    T-->>C: Workflow result: Hello Temporal
+```
+
 ```bash
 kubectl -n temporal run hello --rm -i --restart=Never --image-pull-policy=Always \
   --image=localhost:5001/hello-client:dev -- Temporal
@@ -149,6 +209,18 @@ kubectl -n temporal run hello --rm -i --restart=Never --image-pull-policy=Always
 Expect `Workflow result: Hello Temporal` after a few seconds.
 
 ## 7. See it scale
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> SUSPENDED
+    SUSPENDED --> RUNNING: A workflow starts, resumed within seconds
+    RUNNING --> SUSPENDED: A couple of minutes after the last workflow finishes
+    note right of RUNNING
+        The scaler sizes the pool from the backlog.
+        Between 0 and 3 Actors run at a time.
+    end note
+```
 
 Open a second toolbox shell (`./toolbox.sh` in another terminal) and watch the Actors:
 
@@ -188,6 +260,17 @@ kubectl -n temporal port-forward svc/temporal-ui 8080:8080   # Web UI on http://
 You can now point your browser at [http://localhost:8080](http://localhost:8080) to access the Temporal Web UI.
 
 ## 8. Turn it down
+
+```mermaid
+flowchart LR
+    subgraph inside["Inside the toolbox"]
+        a["./delete-kind-cluster.sh"] --> b["kind cluster and registry<br/>are deleted"] --> c["exit"]
+    end
+    subgraph host["On your machine"]
+        d["./toolbox.sh rm"] --> e["Toolbox and its caches<br/>are removed"]
+    end
+    c --> d
+```
 
 Turn down and delete the `kind` cluster.
 
@@ -244,6 +327,27 @@ Two systems meet in this demo:
 
 Temporal's **Serverless Workers** feature decides *when* a Worker should run. Its open-source **Worker Controller (WCI)** watches each Worker Deployment Version's task queues, runs a scaling algorithm, and asks a **compute provider** to start or stop Workers. The demo adds one such provider, `substrate`, which makes Substrate Actors the Workers.
 
+```mermaid
+flowchart TB
+    client["client<br/>setup and start"] --> server
+    subgraph temporal["Temporal: logical state"]
+        server["Temporal server<br/>workflow histories, task queues"]
+        wci["Worker Controller<br/>watches queues, runs the scaler"]
+        prov["provider<br/>substrate compute provider"]
+        server --> wci --> prov
+    end
+    prov -- "Interface 1, gRPC:<br/>create, resume, suspend, revert Actors" --> api
+    prov -- "Interface 2, workerprotocol over HTTP:<br/>POST /start, POST /drain" --> router
+    subgraph substrate["Agent Substrate: physical state"]
+        api["ate-api-server"]
+        router["atenet-router"]
+        actor["Actor worker-N, suspended when idle<br/>actor/lifecycle + actor/cmd/worker"]
+        api -. "snapshot, resume" .-> actor
+        router --> actor
+    end
+    actor -. "polls for tasks while started" .-> server
+```
+
 | Module | Side | Size | Role |
 |---|---|---|---|
 | [`workerprotocol`](workerprotocol) | shared | ~210 lines | The HTTP contract between the provider and a Worker |
@@ -261,6 +365,25 @@ There are exactly two interfaces between the sides:
 ## B. `workerprotocol`: the contract
 
 **File:** [`workerprotocol/protocol.go`](workerprotocol/protocol.go). This is the only code both sides import. It uses only the standard library, so adding it to the Temporal server build pulls in nothing else.
+
+```mermaid
+sequenceDiagram
+    participant P as Provider, using Client
+    participant H as Actor, NewHandler on port 80
+    participant W as Worker interface
+
+    P->>H: POST /start with a StartRequest
+    H->>W: Start(ctx, req)
+    Note over W: Dials Temporal within DialTimeout, 10 s
+    H-->>P: 200, or 400, 409, 502, 503
+    Note over P: Waits up to StartTimeout, DialTimeout + 35 s
+
+    P->>H: POST /drain
+    H->>W: Drain(ctx)
+    Note over W: Stops within WorkerStopTimeout, 25 s
+    H-->>P: 200
+    Note over P: Waits up to DrainTimeout, WorkerStopTimeout + 15 s
+```
 
 ### Key types
 
@@ -297,6 +420,23 @@ DrainTimeout      = WorkerStopTimeout + 15*time.Second // provider waits longer 
 
 - [`lifecycle.go`](actor/lifecycle/lifecycle.go): the state machine. No Temporal SDK code.
 - [`temporal.go`](actor/lifecycle/temporal.go): the Temporal SDK adapter.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Disconnected: Run, then /readyz answers 200
+    Disconnected --> Polling: /start, dial bounded by DialTimeout
+    Polling --> Polling: /start with an equal request, no reconnect
+    Polling --> Disconnected: /drain stops the Worker and closes the client
+    note left of Disconnected
+        The only state that is ever snapshotted:
+        the golden snapshot and every suspend.
+    end note
+    note right of Polling
+        /start with a different request
+        is rejected with ErrConflict, 409.
+    end note
+```
 
 ### The interface an app sees
 
@@ -373,6 +513,26 @@ With `TLS: true` (for example Temporal Cloud), it sends `apiKeyPlaceholder` as t
 - [`substrate_router.go`](provider/substrate_router.go): tunnels through `atenet-router`.
 - [`substrate_dial.go`](provider/substrate_dial.go): connections and TLS.
 - [`patches/0001-…patch`](provider/patches/0001-add-substrate-compute-provider-type.patch): registers the type with the WCI.
+
+```mermaid
+flowchart TD
+    wci["The Worker Controller asks for N Workers"] --> loop["For each Actor worker-0 to worker-(pool_size-1),<br/>at most 16 at a time"]
+    loop --> q1{"Index below N?"}
+    q1 -- "yes: should be polling" --> create["Create the Actor<br/>AlreadyExists is fine"]
+    create --> q2{"Running?"}
+    q2 -- "no" --> policy["Create the egress policy"]
+    policy --> q3{"Crashed?"}
+    q3 -- "yes" --> revert["Revert"] --> resume["Resume"]
+    q3 -- "no" --> resume
+    resume --> start["POST /start<br/>always sent, idempotent"]
+    q2 -- "yes" --> start
+    start --> q4{"ErrConflict?"}
+    q4 -- "yes: config changed" --> redo["Drain, then /start again"]
+    q4 -- "no" --> polling(["Polling"])
+    q1 -- "no: should be asleep" --> q5{"Running or<br/>resuming?"}
+    q5 -- "yes" --> drain["POST /drain<br/>best effort"] --> suspend["Suspend the Actor"]
+    q5 -- "no" --> asleep(["Stays as it is"])
+```
 
 ### How it plugs in
 
