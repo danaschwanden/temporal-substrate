@@ -1,6 +1,6 @@
 # Getting started
 
-You'll run Temporal's Go Hello World with its Worker inside an [Agent Substrate](https://github.com/agent-substrate/substrate) actor that is suspended whenever there is no work. When a workflow starts, Temporal asks Substrate for a Worker, the actor resumes from a snapshot in under a second, runs the workflow, and is suspended again once idle.
+You'll run [Temporal's Go Hello World](https://docs.temporal.io/develop/go/set-up-your-local-go) with its [Worker](https://docs.temporal.io/serverless-workers) inside an [Agent Substrate](https://github.com/agent-substrate/substrate) [Actor](https://ate.dev/docs/concepts/architecture/) that is suspended whenever there is no work. When a workflow starts, Temporal asks Substrate for a Worker, the actor resumes from a snapshot in under a second, runs the workflow, and is suspended again once idle.
 
 ```
  you ──► Temporal server ── "need a Worker for hello/v1" ──► Substrate
@@ -14,8 +14,9 @@ Everything runs in one local Kubernetes cluster (kind).
 
 You only need **Docker**. Go, kubectl and all the builds run in a toolbox container that uses your Docker.
 
-- On **macOS or Windows**, enable host networking in Docker Desktop: *Settings → Resources → Network → Enable host networking*.
-- Give Docker plenty of memory and disk.
+> [!TIP]
+> - On **macOS or Windows**, enable host networking in Docker Desktop: *Settings → Resources → Network → Enable host networking*.
+> - Give Docker plenty of memory and disk.
 
 Open the toolbox. The rest of this guide runs inside it:
 
@@ -42,7 +43,9 @@ go install ./cmd/kubectl-ate           # adds `kubectl ate`
 cd /work
 ```
 
-There is one addition to the quickstart. The second SPIFFE ID lets the Temporal server reach Worker actors through Substrate's router. The counter demo is installed only for its worker image, which step 5 reuses.
+> [!NOTE]
+> There is one addition to the quickstart. The second SPIFFE ID lets the Temporal server reach Worker actors through Substrate's router.  
+> The counter demo is installed only for its worker image, which [step 5]((#5-deploy-the-actor) reuses.
 
 ## 2. Build Temporal
 
@@ -67,7 +70,9 @@ kubectl apply -f $REPO/temporal-server/deploy/temporal.yaml
 kubectl -n temporal rollout status deploy/temporal-server
 ```
 
-This deploys a single-pod Temporal dev server (in-memory, so a restart forgets everything) and its Web UI. The [manifest](temporal-server/deploy/temporal.yaml) also gives the server an identity and credentials for Substrate, and turns on the Worker Controller with the `substrate` provider.
+This deploys a single-pod Temporal dev server (in-memory, so a restart forgets everything) and its Web UI.
+
+The [manifest](temporal-server/deploy/temporal.yaml) also gives the server an identity and credentials for Substrate, and turns on the Worker Controller with the `substrate` provider.
 
 ## 4. Build the actor
 
@@ -115,7 +120,12 @@ kubectl -n temporal run setup --rm -i --restart=Never --image-pull-policy=Always
   --image=localhost:5001/hello-client:dev --command -- /setup
 ```
 
-[`setup`](client/setup/main.go) registers the version with a compute config: provider `substrate` (atespace `hello-v1`, up to 3 actors) and a scaler that goes from 0 to 3 Workers. Right away, `worker-0` resumes once so the Worker can register its task queue with Temporal. It is suspended again after a couple of minutes.
+[`setup`](client/setup/main.go) registers the version with a compute config:
+- provider `substrate` (atespace `hello-v1`, up to 3 actors) and
+- a scaler that goes from 0 to 3 Workers.  
+
+Right away, `worker-0` resumes once so the Worker can register its task queue with Temporal.  
+It is suspended again after a couple of minutes.
 
 ## 6. Send a request
 
@@ -524,13 +534,8 @@ The design came out of a sequence of discoveries. Each step below names what we 
 
 ## H. Known limitations
 
-- **Not yet run end to end.**
-  - The provider's unit tests ran here against stand-ins of the Temporal and Substrate types. Its Substrate calls were diffed against Substrate's generated client, and the router client was tested over real TLS.
-  - The protocol and lifecycle tests ran against real code.
-  - The Temporal image build runs the provider's tests against the real dependencies, and they pass.
-  - The API-only Substrate module was compiled against real gRPC and protobuf at the server's versions.
 - **Self-hosted only.** The WCI is compiled into the Temporal server. For Temporal Cloud, the provider would have to be accepted upstream.
-- **Pre-1.0 dependencies.** Both the WCI and Substrate are evolving: the provider interface already changed once during this work.
+- **Dependencies.** Both the WCI and Substrate are evolving: the provider interface already changed once during this work.
 - **In-memory Temporal.** The dev server forgets everything on restart. Re-run `setup`.
 - **Open TODOs in the provider:**
   - update an existing egress policy when the config changes;
