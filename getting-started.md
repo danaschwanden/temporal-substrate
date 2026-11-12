@@ -10,6 +10,10 @@ You'll run [Temporal's Go Hello World](https://docs.temporal.io/develop/go/set-u
 
 Everything runs locally in a `kind` cluster based on the Agent Substrate [Quickstart](https://github.com/agent-substrate/substrate#quickstart-development).
 
+![Screenshot the Temporal UI Worker screen](/assets/images/workers.png)
+
+![Screenshot the Temporal UI Workerflow screen](/assets/images/workerflows.png)
+
 ## Before you start
 
 You only need **Docker**. Go, kubectl and all the builds run in a toolbox container that uses your Docker.
