@@ -8,7 +8,7 @@ You'll run [Temporal's Go Hello World](https://docs.temporal.io/develop/go/set-u
               └──────────── Worker polls, runs workflow ◄── Actor worker-0
 ```
 
-Everything runs in one local Kubernetes cluster (kind).
+Everything runs locally in a `kind` cluster based on the Agent Substrate [Quickstart](https://github.com/agent-substrate/substrate#quickstart-development).
 
 ## Before you start
 
