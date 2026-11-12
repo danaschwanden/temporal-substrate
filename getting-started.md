@@ -170,20 +170,25 @@ More to look at:
 
 ```bash
 kubectl ate logs actor worker-0 -a hello-v1                  # "polling" after /start, "drained" before suspend
-kubectl -n temporal port-forward svc/temporal-ui 8080:8080   # Web UI on http://localhost:8080 → Deployments → hello
+kubectl -n temporal port-forward svc/temporal-ui 8080:8080   # Web UI on http://localhost:8080 → Workflows
 ```
+
+You can now point your browser at [http://localhost:8080](http://localhost:8080) to access the Temporal Web UI.
 
 ## 8. Turn it down
 
+Turn down and delete the `kind` cluster.
+
 ```bash
-/work/substrate/hack/delete-kind-cluster.sh    # the cluster and the registry
+cd /work/substrate/hack/
+./delete-kind-cluster.sh    # the cluster and the registry
 exit
 ```
 
 Then, on your machine:
 
 ```bash
-./toolbox.sh rm                                # the toolbox and its caches
+./toolbox.sh rm             # exit the toolbox and remove its caches
 ```
 
 ---
